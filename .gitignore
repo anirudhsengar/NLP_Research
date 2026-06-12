@@ -1,0 +1,25 @@
+.venv/
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+*.egg-info/
+
+# Raw and derived data can include non-redistributable ICNALE text.
+data/raw/
+data/processed/
+artifacts/
+reports/results/
+reports/figures/
+
+# Locally downloaded source archives.
+ICNALE_*.zip
+ICNALE_*.xlsx
+ICNALE_WE_*/
+ICNALE_WEP_*/
+ICNALE_WEUAE_*/
+*:Zone.Identifier
+
+# Hugging Face / model caches if placed in the workspace.
+.cache/
+hf_cache/

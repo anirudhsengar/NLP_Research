@@ -1,0 +1,93 @@
+random_seed: 42
+
+paths:
+  raw_dir: .
+  processed_dir: data/processed
+  artifacts_dir: artifacts
+  reports_dir: reports
+
+datasets:
+  hc3:
+    name: Hello-SimpleAI/HC3
+    configs:
+      - all
+  gpt_wiki_intro:
+    name: aadityaubhat/GPT-wiki-intro
+  icnale:
+    survey_xlsx: ICNALE_Survey_202603.xlsx
+    we_dir: ICNALE_WE_2.6
+    wep_dir: ICNALE_WEP_0.7
+    weuae_dir: ICNALE_WEUAE_1.0
+    we_zip: ICNALE_WE_2.6.zip
+    wep_zip: ICNALE_WEP_0.7.zip
+    weuae_zip: ICNALE_WEUAE_1.0.zip
+    password_env: ICNALE_ZIP_PASSWORD
+    include_wep: true
+    include_weuae: true
+
+splits:
+  train_size: 0.70
+  validation_size: 0.15
+  test_size: 0.15
+
+features:
+  use_word_tfidf: true
+  use_char_tfidf: true
+  use_basic_stats: true
+  word_ngram_range: [1, 2]
+  char_ngram_range: [3, 5]
+  max_word_features: 30000
+  max_char_features: 30000
+  min_df: 2
+  lowercase: true
+  use_spacy: false
+  spacy_model: en_core_web_sm
+  use_lm_stats: false
+  lm_model_name: gpt2
+  lm_max_length: 256
+
+model:
+  class_weight: balanced
+  max_iter: 1000
+  target_fpr: 0.01
+  name: classical_logreg
+
+calibration:
+  target_fpr: 0.01
+  icnale_calibration_fraction: 0.30
+
+evaluation:
+  min_subgroup_size: 30
+  batch_size: 5000
+  bootstrap_iterations: 0
+  bootstrap_seed: 42
+  error_analysis_rows: 100
+
+reporting:
+  version_packages:
+    - datasets
+    - gradio
+    - joblib
+    - matplotlib
+    - numpy
+    - pandas
+    - scikit-learn
+    - scipy
+    - seaborn
+    - torch
+    - transformers
+
+baselines:
+  batch_size: 8
+  max_samples_per_eval: 20000
+  calibrate_threshold_on_hc3_validation: true
+  threshold_calibration_max_samples: 2000
+  gltr_heuristic:
+    enabled: true
+    model_name: gpt2
+    max_length: 256
+  transformer_models:
+    openai_roberta_gpt2:
+      model_name: openai-community/roberta-base-openai-detector
+    hc3_roberta:
+      model_name: Hello-SimpleAI/chatgpt-detector-roberta
