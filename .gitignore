@@ -23,3 +23,7 @@ ICNALE_WEUAE_*/
 # Hugging Face / model caches if placed in the workspace.
 .cache/
 hf_cache/
+
+# Local build artifact: data zips prepared for OneDrive sharing.
+# Not part of the GitHub repo.
+data_bundles/

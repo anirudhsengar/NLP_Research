@@ -3,19 +3,27 @@ from __future__ import annotations
 
 import html
 import re
+import struct
 import sys
 import zipfile
 from pathlib import Path
+from typing import Any
 
 
 W_NS = "http://purl.oclc.org/ooxml/wordprocessingml/main"
 R_NS = "http://purl.oclc.org/ooxml/officeDocument/relationships"
 MC_NS = "http://schemas.openxmlformats.org/markup-compatibility/2006"
 W14_NS = "http://schemas.microsoft.com/office/word/2010/wordml"
+WP_NS = "http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"
+A_NS = "http://schemas.openxmlformats.org/drawingml/2006/main"
+PIC_NS = "http://schemas.openxmlformats.org/drawingml/2006/picture"
+IMAGE_REL_TYPE = "http://purl.oclc.org/ooxml/officeDocument/relationships/image"
+PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
+EMU_PER_INCH = 914400
 
 
 DOCUMENT_PREFIX = f'''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<w:document xmlns:mc="{MC_NS}" xmlns:r="{R_NS}" xmlns:w="{W_NS}" xmlns:w14="{W14_NS}" mc:Ignorable="w14">
+<w:document xmlns:a="{A_NS}" xmlns:mc="{MC_NS}" xmlns:pic="{PIC_NS}" xmlns:r="{R_NS}" xmlns:w="{W_NS}" xmlns:w14="{W14_NS}" xmlns:wp="{WP_NS}" mc:Ignorable="w14">
   <w:body>
 '''
 
@@ -189,6 +197,64 @@ def table(rows: list[list[str]]) -> str:
     return "".join(xml)
 
 
+def image_block(image: dict[str, Any]) -> str:
+    caption = str(image["caption"])
+    width_px = int(image["width_px"])
+    height_px = int(image["height_px"])
+    figure_width_inches = 3.35
+    cx = int(figure_width_inches * EMU_PER_INCH)
+    cy = int(cx * height_px / max(width_px, 1))
+    name = esc(str(image["media_name"]))
+    caption_xml = esc(caption)
+    r_id = esc(str(image["r_id"]))
+    doc_pr_id = int(image["doc_pr_id"])
+    drawing = f'''
+    <w:p>
+      <w:pPr><w:keepNext/><w:keepLines/><w:jc w:val="center"/><w:spacing w:before="4pt" w:after="2pt"/><w:ind w:firstLine="0pt"/></w:pPr>
+      <w:r>
+        <w:drawing>
+          <wp:inline distT="0" distB="0" distL="0" distR="0">
+            <wp:extent cx="{cx}" cy="{cy}"/>
+            <wp:effectExtent l="0" t="0" r="0" b="0"/>
+            <wp:docPr id="{doc_pr_id}" name="{name}" descr="{caption_xml}"/>
+            <wp:cNvGraphicFramePr><a:graphicFrameLocks noChangeAspect="1"/></wp:cNvGraphicFramePr>
+            <a:graphic>
+              <a:graphicData uri="{PIC_NS}">
+                <pic:pic>
+                  <pic:nvPicPr>
+                    <pic:cNvPr id="0" name="{name}" descr="{caption_xml}"/>
+                    <pic:cNvPicPr/>
+                  </pic:nvPicPr>
+                  <pic:blipFill>
+                    <a:blip r:embed="{r_id}"/>
+                    <a:stretch><a:fillRect/></a:stretch>
+                  </pic:blipFill>
+                  <pic:spPr>
+                    <a:xfrm>
+                      <a:off x="0" y="0"/>
+                      <a:ext cx="{cx}" cy="{cy}"/>
+                    </a:xfrm>
+                    <a:prstGeom prst="rect"><a:avLst/></a:prstGeom>
+                  </pic:spPr>
+                </pic:pic>
+              </a:graphicData>
+            </a:graphic>
+          </wp:inline>
+        </w:drawing>
+      </w:r>
+    </w:p>
+'''
+    caption_paragraph = paragraph(
+        caption,
+        style="BodyText",
+        align="center",
+        italic=True,
+        size=14,
+        extra_ppr='<w:keepLines/><w:spacing w:before="0pt" w:after="6pt"/><w:ind w:firstLine="0pt"/>',
+    )
+    return drawing + caption_paragraph
+
+
 def parse_markdown(path: Path) -> dict:
     lines = path.read_text(encoding="utf-8").splitlines()
     title = lines[0].removeprefix("# ").strip()
@@ -235,6 +301,11 @@ def consume_blocks(lines: list[str]) -> list[tuple[str, object]]:
             blocks.append(("h2", line[4:].strip()))
             idx += 1
             continue
+        image_match = image_match_for(line)
+        if image_match is not None:
+            blocks.append(("image", image_match))
+            idx += 1
+            continue
         if line.startswith("|"):
             table_lines = []
             while idx < len(lines) and lines[idx].startswith("|"):
@@ -259,6 +330,8 @@ def consume_blocks(lines: list[str]) -> list[tuple[str, object]]:
         paragraph_lines = [line.strip()]
         idx += 1
         while idx < len(lines) and lines[idx].strip() and not lines[idx].startswith(("### ", "|")):
+            if image_match_for(lines[idx]) is not None:
+                break
             if re.match(r"\[\d+\] ", lines[idx]):
                 break
             paragraph_lines.append(lines[idx].strip())
@@ -267,7 +340,20 @@ def consume_blocks(lines: list[str]) -> list[tuple[str, object]]:
     return blocks
 
 
-def section_to_xml(heading: str, lines: list[str], *, section_number: int | None = None) -> str:
+def image_match_for(line: str) -> dict[str, str] | None:
+    match = re.fullmatch(r"!\[(?P<caption>.*?)\]\((?P<path>.*?)\)", line.strip())
+    if match is None:
+        return None
+    return {"caption": match.group("caption").strip(), "path": match.group("path").strip()}
+
+
+def section_to_xml(
+    heading: str,
+    lines: list[str],
+    *,
+    context: dict[str, Any],
+    section_number: int | None = None,
+) -> str:
     if heading == "Abstract":
         text = " ".join(line.strip() for line in lines if line.strip())
         return paragraph("Abstract- " + text, style="Abstract")
@@ -288,6 +374,8 @@ def section_to_xml(heading: str, lines: list[str], *, section_number: int | None
             subsection_number += 1
         elif kind == "table":
             out.append(table(payload))  # type: ignore[arg-type]
+        elif kind == "image":
+            out.append(image_block(register_image(context, payload)))  # type: ignore[arg-type]
         elif kind == "refs":
             for ref in payload:  # type: ignore[union-attr]
                 out.append(paragraph(ref, style="BodyText"))
@@ -302,7 +390,40 @@ def section_to_xml(heading: str, lines: list[str], *, section_number: int | None
     return "".join(out)
 
 
-def build_document_xml(data: dict) -> str:
+def register_image(context: dict[str, Any], payload: dict[str, str]) -> dict[str, Any]:
+    path = Path(payload["path"])
+    if not path.is_absolute():
+        path = context["markdown_dir"] / path
+    path = path.resolve()
+    if not path.exists():
+        raise FileNotFoundError(f"Figure image not found: {path}")
+    if path.suffix.lower() != ".png":
+        raise ValueError(f"Only PNG figures are supported by this builder: {path}")
+    width_px, height_px = png_dimensions(path)
+    image_index = len(context["images"]) + 1
+    media_name = f"paper_figure_{image_index}.png"
+    image = {
+        "caption": payload["caption"],
+        "path": path,
+        "r_id": f"rIdFigure{image_index}",
+        "media_name": media_name,
+        "doc_pr_id": 1000 + image_index,
+        "width_px": width_px,
+        "height_px": height_px,
+    }
+    context["images"].append(image)
+    return image
+
+
+def png_dimensions(path: Path) -> tuple[int, int]:
+    with path.open("rb") as f:
+        header = f.read(24)
+    if len(header) < 24 or not header.startswith(PNG_SIGNATURE):
+        raise ValueError(f"Not a valid PNG file: {path}")
+    return struct.unpack(">II", header[16:24])
+
+
+def build_document_xml(data: dict, context: dict[str, Any]) -> str:
     pieces = [DOCUMENT_PREFIX]
     pieces.append(paragraph(data["title"], style="papertitle", align="center"))
     pieces.append(paragraph(data["authors"], style="Author", align="center", size=18))
@@ -315,9 +436,9 @@ def build_document_xml(data: dict) -> str:
             pieces.append(section_break_to_two_columns())
             body_started = True
         if heading in {"Abstract", "Keywords", "Acknowledgment", "References"}:
-            pieces.append(section_to_xml(heading, lines))
+            pieces.append(section_to_xml(heading, lines, context=context))
         else:
-            pieces.append(section_to_xml(heading, lines, section_number=section_number))
+            pieces.append(section_to_xml(heading, lines, context=context, section_number=section_number))
             section_number += 1
     pieces.append(final_two_column_section())
     pieces.append(DOCUMENT_SUFFIX)
@@ -326,7 +447,8 @@ def build_document_xml(data: dict) -> str:
 
 def build_docx(template: Path, markdown: Path, output: Path) -> None:
     data = parse_markdown(markdown)
-    document_xml = build_document_xml(data).encode("utf-8")
+    context: dict[str, Any] = {"markdown_dir": markdown.resolve().parent, "images": []}
+    document_xml = build_document_xml(data, context).encode("utf-8")
     title = esc(data["title"])
     core_xml = f'''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:dcterms="http://purl.org/dc/terms/" xmlns:dcmitype="http://purl.org/dc/dcmitype/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
@@ -344,7 +466,30 @@ def build_docx(template: Path, markdown: Path, output: Path) -> None:
                     content = document_xml
                 elif item.filename == "docProps/core.xml":
                     content = core_xml
+                elif item.filename == "word/_rels/document.xml.rels":
+                    content = add_image_relationships(content.decode("utf-8"), context["images"]).encode("utf-8")
+                elif item.filename == "[Content_Types].xml":
+                    content = add_png_content_type(content.decode("utf-8")).encode("utf-8")
                 zout.writestr(item, content)
+            for image in context["images"]:
+                zout.writestr(f"word/media/{image['media_name']}", Path(image["path"]).read_bytes())
+
+
+def add_image_relationships(content: str, images: list[dict[str, Any]]) -> str:
+    if not images:
+        return content
+    additions = "".join(
+        f'<Relationship Id="{esc(str(image["r_id"]))}" Type="{IMAGE_REL_TYPE}" '
+        f'Target="media/{esc(str(image["media_name"]))}"/>'
+        for image in images
+    )
+    return content.replace("</Relationships>", additions + "</Relationships>")
+
+
+def add_png_content_type(content: str) -> str:
+    if 'Extension="png"' in content:
+        return content
+    return content.replace("</Types>", '<Default Extension="png" ContentType="image/png"/></Types>')
 
 
 def main(argv: list[str]) -> int:

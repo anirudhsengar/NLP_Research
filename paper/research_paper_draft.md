@@ -24,15 +24,19 @@ The main contribution is a complete, reproducible pipeline that prepares data, t
 
 ## Related Work
 
-Liang et al. studied bias in GPT detectors against non-native English writing and showed that detectors could misclassify human learner writing as AI-generated [1]. Their result motivates the false-positive focus of this project. In academic settings, the harm of false positives is asymmetric: a missed AI-generated sample may reduce detector usefulness, but a false positive can wrongly implicate a student.
+AI-generated text detection methods can broadly be divided into statistical or language-model-based methods, supervised classifiers, and provenance-based approaches. GLTR uses token-rank statistics from a language model to help identify unusually predictable generated text [3]. DetectGPT instead uses the observation that machine-generated passages can occupy regions of negative curvature in a language model's probability function [8]. More recently, Binoculars proposed a training-free score that contrasts two related language models and reported strong detection performance across multiple generators and text sources [12]. These methods avoid training a task-specific classifier, but they depend on suitable language models and may be computationally more expensive than sparse classical models.
 
-HC3, introduced by Guo et al., provides paired human and ChatGPT answers across domains and has become a useful benchmark for AI-text detection [2]. This project uses HC3 as the primary training and in-domain evaluation source. However, because HC3 is itself a benchmark distribution, good HC3 performance alone cannot establish safety on student writing or Wikipedia-style text.
+Supervised detectors learn differences between human and machine writing from labelled corpora. HC3, introduced by Guo et al., provides paired human and ChatGPT answers across domains and is used as the primary training source in this project [2]. Ghostbuster combines features derived from weaker language models with a trained classifier and does not require probability access to the target generator [9]. It reports strong performance across writing domains, prompts, and generators. Compared with Ghostbuster, the present study uses a simpler and more auditable combination of word TF-IDF, character TF-IDF, lexical statistics, and logistic regression. The aim is not to establish state-of-the-art detection performance, but to examine whether an interpretable detector remains reliable when evaluated beyond its training distribution.
 
-GLTR is a statistical detection and visualization approach based on language-model token ranks [3]. The project includes a GLTR-style heuristic baseline using GPT-2 rank statistics. It also compares against two transformer detector baselines on a fixed sample: an OpenAI-community RoBERTa GPT-2 detector and the Hello-SimpleAI HC3 RoBERTa detector [6], [7]. These transformer baselines are used for comparison only; their full 300,000-row inference over GPT-wiki-intro was not run because of computational cost.
+Recent benchmark research shows that high in-domain accuracy is insufficient evidence of detector robustness. M4 introduced a multi-generator, multi-domain, and multilingual benchmark and found that detectors often fail to generalize to unseen domains and language models [10]. RAID extended robust evaluation to more than six million generations across multiple generators, domains, adversarial attacks, and decoding strategies, and found that detectors were sensitive to unseen generators, sampling settings, repetition penalties, and attacks [11]. These findings motivate the use of GPT-wiki-intro as an out-of-domain evaluation set rather than relying only on HC3 test performance [4].
 
-GPT-wiki-intro is used as an out-of-domain dataset. Its Hugging Face dataset card describes 150,000 rows containing Wikipedia introductions and GPT-generated introductions, including the fields `wiki_intro` and `generated_intro` [4]. In this project, each row is expanded into one human example and one generated example, resulting in 300,000 evaluation examples.
+Robustness can also deteriorate after apparently minor changes to generated text. Krishna et al. showed that discourse-level paraphrasing could sharply reduce detector performance, including a large drop for DetectGPT at a fixed 1 percent false-positive rate, while retrieval over previously generated outputs provided a potential defense [13]. Sadasivan et al. stress-tested classifier, zero-shot, retrieval, and watermarking approaches using recursive paraphrasing and spoofing attacks, and connected detector limits to the statistical distance between human and machine text distributions [14]. The current project does not evaluate adversarial paraphrasing, and therefore its results should be interpreted as non-adversarial domain and population shift results.
 
-ICNALE is used for fairness auditing. The ICNALE readme describes Written Essays as 200-300 word essays, and the project data include ICNALE WE, WEP, and WEUAE modules. The WEP readme notes that participants declared they did not use online writing support tools, but also states that influence from such tools cannot be fully guaranteed for at-home writing. This limitation is important and is treated as part of the scope rather than hidden.
+Fairness is particularly important when detection outputs are used in education. Liang et al. found that several publicly available detectors frequently misclassified non-native English essays as AI-generated while performing much better on native-speaker writing [1]. However, Jiang et al. studied ChatGPT-generated essays in a large-scale writing-assessment setting and reported high detection performance without evidence of bias disadvantaging non-native English speakers [16]. These findings are complementary: they suggest that detector fairness depends strongly on training-data quality, population representation, feature design, and alignment between development data and the intended deployment population. Weber-Wulff et al. similarly evaluated detection tools in academic settings and concluded that existing tools were not sufficiently reliable for academic-integrity decisions, especially under rewriting and obfuscation [15].
+
+ICNALE is used for fairness auditing in this project. The ICNALE readme describes Written Essays as 200-300 word essays, and the project data include ICNALE WE, WEP, and WEUAE modules [5]. The WEP readme notes that participants declared they did not use online writing support tools, but also states that influence from such tools cannot be fully guaranteed for at-home writing. This limitation is important and is treated as part of the scope rather than hidden.
+
+The present study contributes to this literature by jointly examining interpretability, domain shift, population shift, and threshold calibration. It evaluates a transparent classical detector on HC3, GPT-wiki-intro, and ICNALE, reports learner and native-speaker false-positive rates, and investigates whether a target-population-informed threshold can reduce the risk of false accusations.
 
 ## Data
 
@@ -70,9 +74,11 @@ The primary model is logistic regression with balanced class weights and maximum
 
 Feature importance is reported from logistic-regression coefficients. The largest coefficient mass comes from character TF-IDF features, followed by word TF-IDF features and then basic statistics. This does not mean that all high-weight features are semantically meaningful; character n-gram coefficients can capture punctuation, spacing, and style artifacts. The demo therefore reports both raw feature contributions and grouped feature-family contributions.
 
+![FIGURE 1. Logistic-regression coefficient mass is concentrated in character and word TF-IDF features, while basic statistics contribute comparatively little total coefficient mass.](figures/feature_family_weight.png)
+
 ### Baselines
 
-The comparison includes three detector baselines on a fixed 500-row sample per evaluation set: a GLTR-style heuristic, an OpenAI-community RoBERTa GPT-2 detector, and the Hello-SimpleAI HC3 RoBERTa detector. The GLTR-style baseline uses GPT-2 token-rank statistics to construct a score. The transformer baselines use Hugging Face sequence-classification checkpoints. Baseline thresholds are calibrated on an HC3 validation sample to target the configured false-positive rate.
+The comparison includes three detector baselines on a fixed 500-row sample per evaluation set: a GLTR-style heuristic, an OpenAI-community RoBERTa GPT-2 detector, and the Hello-SimpleAI HC3 RoBERTa detector. The GLTR-style baseline uses GPT-2 token-rank statistics to construct a score. The transformer baselines use Hugging Face sequence-classification checkpoints [6], [7]. Baseline thresholds are calibrated on an HC3 validation sample to target the configured false-positive rate.
 
 The baseline comparison is intentionally labeled as fixed-sample comparison. Full transformer inference over all 300,000 GPT-wiki-intro examples was not run, so the baseline results should not be interpreted as full-dataset transformer results.
 
@@ -100,13 +106,25 @@ TABLE II reports the main full-data evaluation for the classical logistic-regres
 | GPT-wiki OOD | 300,000 | 0.5043 | 0.7902 | 0.7999 | 0.9466 |
 | ICNALE | 8,140 | N/A | N/A | 0.7773 | N/A |
 
+Figure 2 shows the HC3 test confusion matrix at the default validation-calibrated threshold. The model correctly classifies most HC3 human and AI examples, with 112 false positives among 8,783 human examples and 29 false negatives among 4,054 AI examples.
+
+![FIGURE 2. HC3 test confusion matrix for the classical logistic-regression detector under the default HC3 validation threshold. Cell annotations show counts and row-normalized percentages.](figures/hc3_confusion_matrix.png)
+
 The model performs strongly on the in-domain HC3 test split, but the default threshold does not transfer. GPT-wiki-intro human FPR is 0.7999, and ICNALE human-only FPR is 0.7773. These rates show that HC3 validation calibration is unsafe for Wikipedia-style text and learner-English essays.
+
+![FIGURE 3. Under the default HC3-calibrated threshold, human false-positive rates remain low on HC3 but rise sharply on GPT-wiki-intro and ICNALE.](figures/default_shift_rates.png)
+
+Figure 4 shows the score-distribution reason for this failure. HC3 human and AI examples are mostly separated, but GPT-wiki human text and ICNALE human essays receive high AI scores, placing many human samples above the default threshold.
+
+![FIGURE 4. AI-score distributions show clean in-domain separation on HC3 but substantial score shift for GPT-wiki and ICNALE human writing. Dashed and dotted vertical lines mark the default and education thresholds.](figures/score_distribution_shift.png)
 
 ### Native and Learner-English False Positives
 
 The ICNALE full-data fairness summary shows 254 false positives among 400 native-speaker essays and 6,073 false positives among 7,740 learner essays. The native-speaker FPR is 0.6350, while the learner-English FPR is 0.7846. The learner-minus-native gap is 0.1496.
 
 Because TOEFL data were unavailable, this is not a direct reproduction of Liang et al. It nevertheless supports the same concern: excellent benchmark performance can coexist with high false-positive rates for human learner writing.
+
+![FIGURE 5. The conservative education threshold greatly lowers held-out ICNALE false positives for both native-speaker and learner-English essays, but it does this by moving the decision boundary close to 1.0.](figures/icnale_subgroup_policy.png)
 
 ### Calibrated Education Policy
 
@@ -122,6 +140,8 @@ TABLE III compares the default threshold with the conservative education thresho
 | ICNALE audit | Education | 0.0086 | N/A |
 
 The education threshold sharply reduces false positives. On the held-out ICNALE audit split, FPR falls from 0.7769 to 0.0086. Learner FPR falls to 0.0090, and native FPR is 0.0000. However, the cost is severe: HC3 test TPR drops from 0.9928 to 0.4748, and GPT-wiki-intro TPR drops from 0.9466 to 0.1644. This tradeoff means the education policy is safer for avoiding accusations, but weak as a binary detector.
+
+![FIGURE 6. The education threshold reduces human false positives across shifted sets, but sharply reduces AI recall on HC3 and GPT-wiki-intro. ICNALE has no AI recall because it is human-only in this project.](figures/education_threshold_tradeoff.png)
 
 ### Fixed-Sample Baseline Comparison
 
@@ -144,6 +164,22 @@ On the fixed ICNALE sample, the OpenAI RoBERTa GPT-2 detector has lower false-po
 Feature ablations show that strong in-domain accuracy does not align cleanly with fairness safety. Word TF-IDF alone has HC3 test F1-macro 0.9724 and ICNALE FPR 0.1558. Basic lexical statistics alone have lower HC3 test F1-macro 0.7815 but ICNALE FPR 0.1061. The combined word, character, and statistics model has HC3 test F1-macro 0.9874 but ICNALE FPR 0.7773. This indicates that feature combinations that improve benchmark detection can also amplify false positives under distribution shift.
 
 This result is not a reason to prefer a weak model. Instead, it shows why detector development must evaluate both predictive performance and human false-positive risk before recommending any threshold for educational use.
+
+![FIGURE 7. Feature ablations show that higher HC3 F1-macro does not guarantee lower ICNALE human false-positive rates.](figures/ablation_fairness_tradeoff.png)
+
+### Comparison with Prior Work
+
+The HC3 test results demonstrate that the classical model can fit its training distribution extremely well, obtaining an F1-macro of 0.9874 and AUROC of 0.9992. This result is consistent with prior supervised detectors that report very high benchmark performance, including Ghostbuster [9]. However, direct numerical comparison is inappropriate because the studies use different datasets, generators, prompts, document lengths, thresholds, and evaluation protocols.
+
+The more informative comparison concerns generalization. Under the HC3-calibrated threshold, the model's GPT-wiki-intro human false-positive rate rises to 0.7999 and its ICNALE human false-positive rate rises to 0.7773. This supports the broader conclusion of M4 and RAID that detector performance can deteriorate sharply under unseen domains, models, and evaluation conditions [10], [11]. In this study, the failure is especially serious because shifted human text is frequently classified as AI-generated, creating a direct risk of false accusation.
+
+The ICNALE result is directionally consistent with Liang et al. [1]. The default detector produces a false-positive rate of 0.7846 for learner-English essays and 0.6350 for native-speaker essays. Liang et al. also observed higher false-positive rates for non-native writing. However, the exact percentages should not be compared directly because TOEFL and ICNALE differ in participant populations, prompts, proficiency distributions, text sources, detector families, thresholds, and evaluation procedures.
+
+The findings also help explain the apparently different result reported by Jiang et al. [16]. Their study was developed in a large-scale writing-assessment setting and reported no evidence of bias against non-native speakers. In contrast, the present detector was trained on HC3 answers rather than learner essays. The difference suggests that population and task alignment may be more important for fairness than high benchmark accuracy alone.
+
+The conservative education threshold reduces the held-out ICNALE false-positive rate from 0.7769 to 0.0086. This demonstrates that target-population calibration can reduce harm, consistent with the importance of deployment-aligned data shown by Jiang et al. [16]. Nevertheless, the policy reduces HC3 AI recall to 0.4748 and GPT-wiki-intro AI recall to 0.1644. It therefore represents a risk-management policy rather than a competitive high-recall detector. A controlled comparison with Ghostbuster, Binoculars, DetectGPT, and other methods would require running all models on the same HC3, GPT-wiki-intro, and ICNALE samples under identical false-positive-rate targets.
+
+Binoculars reported detecting more than 90 percent of generated samples at a 0.01 percent false-positive rate across its evaluation settings [12]. By comparison, the low recall of the conservative policy in this project indicates that threshold adjustment cannot fully compensate for weak separation between shifted human and AI score distributions.
 
 ## Discussion
 
@@ -173,6 +209,8 @@ Fourth, the reported final classical model does not include optional spaCy POS/N
 
 Fifth, the current run reports point estimates without bootstrap confidence intervals. Confidence intervals would strengthen the paper, especially for subgroup comparisons.
 
+Sixth, the evaluation does not test adversarially paraphrased, human-edited, translated, or mixed human-AI text. Prior research has shown that paraphrasing can substantially reduce the effectiveness of several detector families; therefore, the reported out-of-domain results represent natural distribution shift rather than adversarial robustness [13], [14].
+
 Finally, WEP includes a corpus-specific caveat: participants declared that they did not use writing-support tools, but the ICNALE team notes that influence from such tools cannot be fully guaranteed for at-home writing. This does not invalidate the audit, but it should be disclosed.
 
 ## Conclusion
@@ -194,3 +232,21 @@ This project implemented an interpretable and bias-aware AI-generated text detec
 [6] OpenAI Community, "roberta-base-openai-detector," Hugging Face model repository. [Online]. Available: https://huggingface.co/openai-community/roberta-base-openai-detector
 
 [7] Hello-SimpleAI, "chatgpt-detector-roberta," Hugging Face model repository. [Online]. Available: https://huggingface.co/Hello-SimpleAI/chatgpt-detector-roberta
+
+[8] E. Mitchell, Y. Lee, A. Khazatsky, C. D. Manning, and C. Finn, "DetectGPT: Zero-shot machine-generated text detection using probability curvature," in Proc. 40th Int. Conf. Machine Learning, vol. 202, 2023, pp. 24950-24962.
+
+[9] V. Verma, E. Fleisig, N. Tomlin, and D. Klein, "Ghostbuster: Detecting text ghostwritten by large language models," in Proc. 2024 Conf. North American Chapter of the Association for Computational Linguistics: Human Language Technologies, 2024, pp. 1702-1717, doi: 10.18653/v1/2024.naacl-long.95.
+
+[10] Y. Wang et al., "M4: Multi-generator, multi-domain, and multi-lingual black-box machine-generated text detection," in Proc. 18th Conf. European Chapter of the Association for Computational Linguistics, 2024, pp. 1369-1407, doi: 10.18653/v1/2024.eacl-long.83.
+
+[11] L. Dugan et al., "RAID: A shared benchmark for robust evaluation of machine-generated text detectors," in Proc. 62nd Annual Meeting of the Association for Computational Linguistics, 2024, pp. 12463-12492, doi: 10.18653/v1/2024.acl-long.674.
+
+[12] A. Hans et al., "Spotting LLMs with Binoculars: Zero-shot detection of machine-generated text," in Proc. 41st Int. Conf. Machine Learning, vol. 235, 2024, pp. 17519-17537.
+
+[13] K. Krishna, Y. Song, M. Karpinska, J. Wieting, and M. Iyyer, "Paraphrasing evades detectors of AI-generated text, but retrieval is an effective defense," in Advances in Neural Information Processing Systems, vol. 36, 2023, pp. 27469-27500.
+
+[14] V. S. Sadasivan, A. Kumar, S. Balasubramanian, W. Wang, and S. Feizi, "Can AI-generated text be reliably detected? Stress testing AI text detectors under various attacks," Transactions on Machine Learning Research, Jan. 2025.
+
+[15] D. Weber-Wulff et al., "Testing of detection tools for AI-generated text," International Journal for Educational Integrity, vol. 19, art. no. 26, 2023, doi: 10.1007/s40979-023-00146-z.
+
+[16] Y. Jiang, J. Hao, M. Fauss, and C. Li, "Detecting ChatGPT-generated essays in a large-scale writing assessment: Is there a bias against non-native English speakers?" Computers & Education, vol. 217, art. no. 105070, 2024, doi: 10.1016/j.compedu.2024.105070.
