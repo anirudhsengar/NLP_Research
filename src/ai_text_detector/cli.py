@@ -413,7 +413,7 @@ def paper_study(
         help="Run configured GLTR/RoBERTa baselines on the paper-study eval frames.",
     ),
 ):
-    """Run the revised-paper HC3/DAIGT reproduction and selective-policy extension."""
+    """Run the HC3/DAIGT paper study and selective-policy evaluation."""
     cfg = load_config(config)
     ensure_dirs(cfg)
     outputs = run_paper_study(

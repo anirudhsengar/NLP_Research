@@ -194,6 +194,65 @@ def load_daigt_v2(config: dict[str, Any], *, max_samples: int | None = None) -> 
     return df
 
 
+def load_anchor_merged(config: dict[str, Any], *, max_samples: int | None = None) -> pd.DataFrame:
+    """Load the frozen merged HC3/DAIGT CSV used by the public anchor notebooks."""
+    ds_cfg = config.get("datasets", {}).get("anchor_merged", {})
+    configured_path = ds_cfg.get("path", "data/raw/anchor_merged/merged_dataset.csv")
+    path = Path(config.get("_project_root", Path.cwd())) / configured_path
+    if Path(configured_path).is_absolute():
+        path = Path(configured_path)
+    if not path.exists():
+        raise FileNotFoundError(
+            "Anchor merged CSV not found. Expected "
+            f"{path}. Download the Git LFS file data/merged_dataset(1).csv from "
+            "https://github.com/crusnix/ai_text_detector_final and place it there, "
+            "or set paper_study.use_anchor_merged to false."
+        )
+
+    text_col = str(ds_cfg.get("text_column", "text"))
+    label_col = str(ds_cfg.get("label_column", "label"))
+    source_col = str(ds_cfg.get("source_column", "source"))
+    raw = pd.read_csv(path)
+    missing = [column for column in (text_col, label_col, source_col) if column not in raw.columns]
+    if missing:
+        raise ValueError(f"Anchor merged file {path} is missing required columns: {missing}")
+
+    rows = []
+    for idx, record in raw.iterrows():
+        text = str(record.get(text_col, "") or "").strip()
+        if not text:
+            continue
+        anchor_source = str(record.get(source_col, "") or "").strip()
+        dataset, domain = _parse_anchor_source(anchor_source)
+        label = int(record.get(label_col))
+        rows.append(
+            _row(
+                sample_id=f"anchor:{anchor_source}:{idx}",
+                dataset=dataset,
+                split="",
+                text=text,
+                label=label,
+                source=domain,
+                domain=domain,
+                group_id=f"anchor:{anchor_source}:{idx}",
+                license_tag="Anchor merged HC3/DAIGT local use",
+            )
+        )
+
+    df = ensure_canonical(pd.DataFrame(rows))
+    if max_samples:
+        df = _balanced_sample(df, max_samples=max_samples, seed=config["random_seed"])
+    return df
+
+
+def _parse_anchor_source(anchor_source: str) -> tuple[str, str]:
+    if anchor_source.startswith("HC3_"):
+        return "hc3", anchor_source.removeprefix("HC3_")
+    if anchor_source.startswith("DAIGT_v2_"):
+        return "daigt_v2", anchor_source.removeprefix("DAIGT_v2_")
+    return "anchor_merged", anchor_source or "unknown"
+
+
 def _load_hf_dataset(name: str, configs: list[str] | None) -> DatasetDict:
     tried = []
     candidate_configs = list(configs or [])

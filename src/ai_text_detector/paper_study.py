@@ -16,7 +16,13 @@ import pandas as pd
 from ai_text_detector.augmentation import transformed_frame
 from ai_text_detector.baselines import run_transformer_baselines
 from ai_text_detector.calibration import split_icnale_calibration_audit
-from ai_text_detector.data import load_daigt_v2, load_gpt_wiki_intro, load_hc3, load_icnale
+from ai_text_detector.data import (
+    load_anchor_merged,
+    load_daigt_v2,
+    load_gpt_wiki_intro,
+    load_hc3,
+    load_icnale,
+)
 from ai_text_detector.evaluation import save_feature_importance
 from ai_text_detector.metrics import (
     bootstrap_metric_intervals,
@@ -32,7 +38,7 @@ from ai_text_detector.selective import (
     calibrate_selective_policy,
     policy_satisfies_constraints,
 )
-from ai_text_detector.splitting import leave_one_domain_out_frames, split_by_topic
+from ai_text_detector.splitting import leave_one_domain_out_frames, split_by_anchor_source, split_by_topic
 
 
 def run_paper_study(
@@ -44,7 +50,7 @@ def run_paper_study(
     bootstrap_iterations: int | None,
     run_baselines_flag: bool,
 ) -> dict[str, Path]:
-    """Run the revised-paper study and save report-ready artifacts."""
+    """Run the paper study and save report-ready artifacts."""
     cfg = copy.deepcopy(config)
     if bootstrap_iterations is not None:
         cfg.setdefault("evaluation", {})["bootstrap_iterations"] = int(bootstrap_iterations)
@@ -57,14 +63,18 @@ def run_paper_study(
     frames = _load_study_frames(cfg, max_samples=max_samples, skip_daigt=skip_daigt, skip_icnale=skip_icnale)
     profile_path = save_data_profile(frames, cfg)
 
-    hc3 = frames["hc3"]
-    daigt = frames.get("daigt_v2")
+    if "anchor_merged" in frames:
+        hc3 = frames["anchor_merged"][frames["anchor_merged"]["dataset"] == "hc3"].copy()
+        topic_frame = _build_topic_frame(frames["anchor_merged"], None, cfg)
+    else:
+        hc3 = frames["hc3"]
+        daigt = frames.get("daigt_v2")
+        topic_frame = _build_topic_frame(hc3, daigt, cfg)
     icnale_calibration, icnale_audit = _split_icnale_for_study(
         frames.get("icnale_fairness"),
         cfg=cfg,
         skip_icnale=skip_icnale,
     )
-    topic_frame = _build_topic_frame(hc3, daigt, cfg)
     eval_frames = {
         "topic_test": topic_frame[topic_frame["split"] == "test"].copy(),
         "gpt_wiki_intro_ood": frames["gpt_wiki_intro"].copy(),
@@ -258,6 +268,24 @@ def _load_study_frames(
     skip_icnale: bool,
 ) -> dict[str, pd.DataFrame]:
     processed = Path(cfg["paths"]["processed_dir"])
+    if bool(cfg.get("paper_study", {}).get("use_anchor_merged", False)) and not skip_daigt:
+        frames = {
+            "anchor_merged": load_anchor_merged(cfg, max_samples=max_samples),
+            "gpt_wiki_intro": _load_prepared_or_raw(
+                processed / "gpt_wiki_intro.jsonl",
+                lambda: load_gpt_wiki_intro(cfg),
+            ),
+        }
+        icnale_path = processed / "icnale_fairness.jsonl"
+        if not skip_icnale:
+            frames["icnale_fairness"] = _load_prepared_or_raw(icnale_path, lambda: load_icnale(cfg))
+        if max_samples:
+            frames = {
+                name: _sample_for_study(frame, max_samples=max_samples, seed=int(cfg.get("random_seed", 42)))
+                for name, frame in frames.items()
+            }
+        return frames
+
     frames = {
         "hc3": _load_prepared_or_raw(processed / "hc3.jsonl", lambda: load_hc3(cfg)),
         "gpt_wiki_intro": _load_prepared_or_raw(
@@ -311,6 +339,8 @@ def _build_topic_frame(hc3: pd.DataFrame, daigt: pd.DataFrame | None, cfg: dict[
         )
     )
     split_cfg = cfg.get("splits", {})
+    if str(split_cfg.get("mode", "")).lower() == "anchor_source":
+        return split_by_anchor_source(combined)
     return split_by_topic(
         combined,
         topic_col="topic_key",

@@ -204,8 +204,12 @@ def final_two_column_section() -> str:
       <w:pgMar w:top="54pt" w:right="44.65pt" w:bottom="72pt" w:left="44.65pt" w:header="36pt" w:footer="36pt" w:gutter="0pt"/>
       <w:cols w:num="2" w:space="18pt"/>
       <w:docGrid w:linePitch="360"/>
-    </w:sectPr>
+</w:sectPr>
 """
+
+
+def column_break() -> str:
+    return '    <w:p><w:r><w:br w:type="column"/></w:r></w:p>\n'
 
 
 def table(rows: list[list[str]]) -> str:
@@ -519,7 +523,9 @@ def section_to_xml(
         text = " ".join(line.strip() for line in lines if line.strip())
         return paragraph("Keywords- " + text, style="Keywords")
 
-    if heading in {"Acknowledgment", "References"}:
+    if heading == "References":
+        out = [column_break(), manual_component_heading(heading)]
+    elif heading == "Acknowledgment":
         out = [manual_component_heading(heading)]
     else:
         if section_number is None:

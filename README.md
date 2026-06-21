@@ -48,6 +48,20 @@ export ICNALE_ZIP_PASSWORD='your-icnale-password'
 
 HC3 and GPT-wiki-intro are fetched through Hugging Face `datasets`.
 
+For the final paper-study reproduction, the default path uses the frozen merged
+HC3/DAIGT CSV from the public anchor codebase:
+
+```bash
+git clone https://github.com/crusnix/ai_text_detector_final.git /tmp/ai_text_detector_final
+# With Git LFS installed:
+git -C /tmp/ai_text_detector_final lfs pull --include='data/merged_dataset(1).csv'
+mkdir -p data/raw/anchor_merged
+cp "/tmp/ai_text_detector_final/data/merged_dataset(1).csv" data/raw/anchor_merged/merged_dataset.csv
+```
+
+The expected columns are `text`, `label`, and `source`. Raw data paths are ignored
+by git and should not be redistributed from this repository.
+
 ## Fast Reproduction Run
 
 This runs a CPU-safe subset, trains the logistic-regression detector, and evaluates HC3 test, GPT-wiki-intro OOD, and ICNALE fairness:
@@ -111,17 +125,26 @@ Run the older binary-model calibration command when you need the legacy educatio
 uv run aidetect calibrate
 ```
 
-Run the revised reproduction-and-extension study for the paper. This uses HC3 plus DAIGT v2
-unless `--skip-daigt` is set, compares sparse logistic-regression feature families, calibrates
-a three-way selective policy, and writes the new paper tables and figures:
+Run the final paper study. By default this uses the frozen anchor merged CSV and
+the public notebook's fixed source split, compares sparse logistic-regression
+feature families, calibrates a three-way selective policy, and writes the paper
+tables and figures:
 
 ```bash
+# Public-data smoke test without the frozen merged CSV.
 uv run aidetect paper-study --sample-size 2000 --skip-daigt --bootstrap-iterations 20
-uv run aidetect paper-study --sample-size 0 --bootstrap-iterations 1000 --run-baselines
+
+# Anchor-compatible smoke test with the frozen merged CSV.
+uv run aidetect paper-study --sample-size 2000 --bootstrap-iterations 20
+
+# Full final run used for the paper artifacts.
+uv run aidetect paper-study --sample-size 0 --bootstrap-iterations 1000
 ```
 
-For the full DAIGT reproduction, place `train_v2_drcat_02.csv` at
-`data/raw/daigt_v2/train_v2_drcat_02.csv` with at least `text` and `label` columns.
+The `--skip-daigt` smoke command uses public HC3/GPT-wiki data without the frozen
+anchor merge. The optional raw DAIGT v2 loader is still available at
+`data/raw/daigt_v2/train_v2_drcat_02.csv`, but it is not the default paper-study
+path because the anchor repository uses its own frozen merged CSV.
 
 Regenerate the dataset provenance/count report from prepared files:
 
