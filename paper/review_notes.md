@@ -1,21 +1,22 @@
 # Review Notes Before Submission
 
-Generated on June 10, 2026 after the final experiment and paper build pass.
+Generated after the DAIGT-inclusive `paper-study` run completed on June 20, 2026.
 
 ## Items That May Need Human Confirmation
 
 - Author emails were not provided, so the final paper uses names/student IDs and the confirmed department/university/city/country affiliation only.
-- No instructor, course, sponsor, or funding acknowledgment was confirmed. The acknowledgment section was omitted instead of leaving unconfirmed draft text.
-- TOEFL data were not used because access was paid/restricted. The paper frames ICNALE as a fallback learner-English fairness audit, not as a TOEFL reproduction.
-- The reported transformer detector baselines are fixed-sample comparisons with 500 rows per evaluation set. Full 300,000-row transformer inference over GPT-wiki-intro was not run.
-- The reported final classifier does not use optional spaCy POS/NER/dependency features or GPT-2 language-model statistics. Those features exist in code but are not part of the final reported model.
-- Bootstrap confidence intervals are supported by the implementation but were not enabled in the saved final run, so the paper reports point estimates.
-- ICNALE WEP has a corpus caveat: participants declared no online writing-support use, but the ICNALE documentation notes that influence from such tools cannot be fully guaranteed for at-home writing.
+- No instructor, course, sponsor, or funding acknowledgment was confirmed. The acknowledgment section is omitted rather than filled with unconfirmed text.
+- DAIGT v2 is required for the final reproduction run but is not redistributed by this repository. The local expected path is `data/raw/daigt_v2/train_v2_drcat_02.csv`.
+- TOEFL remains out of scope. ICNALE is used as the learner-English fairness audit.
+- ICNALE is human-only in this study, so it supports false-positive auditing but not AI recall for learner-English prompts.
+- ICNALE audit rows are never used for training, threshold selection, or model selection.
+- Transformer baselines are not part of the final paper-study claim. The final claim is about sparse logistic-regression reproduction plus selective-policy modification.
+- Elastic-net logistic regression is implemented as an optional ablation but excluded from the default final study because it is too slow for the large sparse run and does not change the paper's main harm-reduction claim.
 
 ## Final Run Notes
 
-- Full-data classical evaluation, calibration, fixed-sample baseline comparison, and full-data ablations were regenerated on June 10, 2026.
-- `uv run pytest` passed earlier in the final run with 19 tests.
-- `uv run ruff check` passed after the regenerated experiments.
-- During baseline inference, Hugging Face emitted unauthenticated download warnings, but the configured models loaded and comparison outputs were written.
-- The OpenAI RoBERTa detector load reported unexpected pooler weights, which is a standard Transformers warning for this checkpoint family and did not block inference.
+- The selected model is `word_char_stats_lr`.
+- Final result tables are generated from `reports/results/paper_study_summary.csv`, `reports/results/selective_policy_table.csv`, `reports/results/topic_holdout_results.csv`, and `reports/results/style_invariance_results.csv`.
+- Bootstrap confidence intervals use 1,000 resamples. The GPT-wiki-intro bootstrap population is capped at 20,000 rows for CPU feasibility; this cap is recorded in the result CSV.
+- The selected model is evaluated on the full 300,000-row GPT-wiki-intro set. Non-selected sparse variants use the configured comparison sample for large out-of-domain comparisons.
+- The paper's claimed improvement is harm reduction through high-confidence selective deployment, not state-of-the-art raw detection accuracy.

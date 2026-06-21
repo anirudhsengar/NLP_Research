@@ -13,6 +13,12 @@ datasets:
       - all
   gpt_wiki_intro:
     name: aadityaubhat/GPT-wiki-intro
+  daigt_v2:
+    path: data/raw/daigt_v2/train_v2_drcat_02.csv
+    text_column: text
+    label_column: label
+    topic_column: prompt_name
+    source_column: source
   icnale:
     survey_xlsx: ICNALE_Survey_202603.xlsx
     we_dir: ICNALE_WE_2.6
@@ -26,11 +32,13 @@ datasets:
     include_weuae: true
 
 splits:
+  mode: group
   train_size: 0.70
   validation_size: 0.15
   test_size: 0.15
 
 features:
+  n_jobs: -1
   use_word_tfidf: true
   use_char_tfidf: true
   use_basic_stats: true
@@ -47,19 +55,44 @@ features:
   lm_max_length: 256
 
 model:
+  variant: word_char_stats_lr
   class_weight: balanced
   max_iter: 1000
   target_fpr: 0.01
   name: classical_logreg
+  penalty: l2
+  l1_ratio: null
 
 calibration:
   target_fpr: 0.01
   icnale_calibration_fraction: 0.30
 
+selective_policy:
+  target_fpr: 0.01
+  learner_target_fpr: 0.01
+
+augmentation:
+  transforms:
+    - whitespace
+    - quotes
+    - punctuation
+
+paper_study:
+  comparison_eval_sample_size: 30000
+  source_holdout_sample_size: 30000
+  source_holdout_max_word_features: 8000
+  source_holdout_max_char_features: 8000
+  max_word_features: 12000
+  max_char_features: 12000
+  include_elastic_net: false
+
 evaluation:
+  n_jobs: -1
   min_subgroup_size: 30
   batch_size: 5000
   bootstrap_iterations: 0
+  bootstrap_sample_size: 20000
+  bootstrap_n_jobs: -1
   bootstrap_seed: 42
   error_analysis_rows: 100
 

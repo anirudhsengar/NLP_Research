@@ -17,8 +17,10 @@ def prepare_all(
     *,
     max_hc3_samples: int | None = None,
     max_gptwiki_samples: int | None = None,
+    max_daigt_samples: int | None = None,
     include_optional_icnale: bool | None = None,
     skip_icnale: bool = False,
+    include_daigt: bool = False,
 ) -> dict[str, Path]:
     processed_dir = Path(config["paths"]["processed_dir"])
     processed_dir.mkdir(parents=True, exist_ok=True)
@@ -29,6 +31,9 @@ def prepare_all(
         "hc3": write_jsonl(hc3, processed_dir / "hc3.jsonl"),
         "gpt_wiki_intro": write_jsonl(gptwiki, processed_dir / "gpt_wiki_intro.jsonl"),
     }
+    if include_daigt:
+        daigt = load_daigt_v2(config, max_samples=max_daigt_samples)
+        outputs["daigt_v2"] = write_jsonl(daigt, processed_dir / "daigt_v2.jsonl")
     if not skip_icnale:
         icnale = load_icnale(config, include_optional=include_optional_icnale)
         outputs["icnale"] = write_jsonl(icnale, processed_dir / "icnale_fairness.jsonl")
@@ -131,6 +136,57 @@ def load_gpt_wiki_intro(config: dict[str, Any], *, max_samples: int | None = Non
                         license_tag="GPT-wiki-intro source-dependent",
                     )
                 )
+
+    df = ensure_canonical(pd.DataFrame(rows))
+    if max_samples:
+        df = _balanced_sample(df, max_samples=max_samples, seed=config["random_seed"])
+    return df
+
+
+def load_daigt_v2(config: dict[str, Any], *, max_samples: int | None = None) -> pd.DataFrame:
+    """Load the local DAIGT v2 CSV used for the HC3+TF-IDF reproduction track."""
+    ds_cfg = config.get("datasets", {}).get("daigt_v2", {})
+    configured_path = ds_cfg.get("path", "data/raw/daigt_v2/train_v2_drcat_02.csv")
+    path = Path(config.get("_project_root", Path.cwd())) / configured_path
+    if Path(configured_path).is_absolute():
+        path = Path(configured_path)
+    if not path.exists():
+        raise FileNotFoundError(
+            "DAIGT v2 CSV not found. Expected "
+            f"{path}. Download train_v2_drcat_02.csv there, or rerun with --skip-daigt."
+        )
+
+    text_col = str(ds_cfg.get("text_column", "text"))
+    label_col = str(ds_cfg.get("label_column", "label"))
+    topic_col = str(ds_cfg.get("topic_column", "prompt_name"))
+    source_col = str(ds_cfg.get("source_column", "source"))
+    raw = pd.read_csv(path)
+    missing = [column for column in (text_col, label_col) if column not in raw.columns]
+    if missing:
+        raise ValueError(f"DAIGT v2 file {path} is missing required columns: {missing}")
+
+    rows = []
+    for idx, record in raw.iterrows():
+        text = str(record.get(text_col, "") or "").strip()
+        if not text:
+            continue
+        label = _normalize_daigt_label(record.get(label_col))
+        topic = _first_nonempty(record, topic_col, source_col, default="daigt_v2")
+        source = _first_nonempty(record, source_col, topic_col, default="daigt_v2")
+        group_id = f"daigt_v2:{topic}:{idx}"
+        rows.append(
+            _row(
+                sample_id=f"{group_id}:{label}",
+                dataset="daigt_v2",
+                split="",
+                text=text,
+                label=label,
+                source=source,
+                domain=topic,
+                group_id=group_id,
+                license_tag="DAIGT v2 local use",
+            )
+        )
 
     df = ensure_canonical(pd.DataFrame(rows))
     if max_samples:
@@ -250,3 +306,15 @@ def _balanced_sample(df: pd.DataFrame, *, max_samples: int, seed: int) -> pd.Dat
                 [sampled, remaining.sample(min(len(remaining), max_samples - len(sampled)), random_state=seed)]
             )
     return sampled.reset_index(drop=True)
+
+
+def _normalize_daigt_label(value) -> int:
+    text = str(value).strip().lower()
+    if text in {"1", "ai", "generated", "machine", "machine_generated", "true"}:
+        return LABEL_AI
+    if text in {"0", "human", "student", "original", "false"}:
+        return LABEL_HUMAN
+    numeric = pd.to_numeric(pd.Series([value]), errors="coerce").iloc[0]
+    if pd.isna(numeric):
+        raise ValueError(f"Unexpected DAIGT label value: {value!r}")
+    return LABEL_AI if int(numeric) == 1 else LABEL_HUMAN

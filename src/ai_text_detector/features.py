@@ -403,7 +403,7 @@ def make_feature_pipeline(feature_config: dict) -> FeatureUnion:
     if not transformers:
         raise ValueError("At least one feature family must be enabled.")
 
-    return FeatureUnion(transformer_list=transformers, n_jobs=None)
+    return FeatureUnion(transformer_list=transformers, n_jobs=feature_config.get("n_jobs"))
 
 
 def feature_names(feature_union: FeatureUnion) -> np.ndarray:

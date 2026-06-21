@@ -2,7 +2,12 @@ from __future__ import annotations
 
 import pandas as pd
 
-from ai_text_detector.metrics import compute_binary_metrics, subgroup_fpr, threshold_for_target_fpr
+from ai_text_detector.metrics import (
+    bootstrap_metric_intervals,
+    compute_binary_metrics,
+    subgroup_fpr,
+    threshold_for_target_fpr,
+)
 
 
 def test_threshold_for_target_fpr_keeps_human_false_positives_low():
@@ -12,6 +17,23 @@ def test_threshold_for_target_fpr_keeps_human_false_positives_low():
     assert 0.3 < threshold <= 0.4
     metrics = compute_binary_metrics(y_true, y_score, threshold=threshold)
     assert metrics["fpr"] <= 0.25
+
+
+def test_bootstrap_metric_intervals_can_cap_large_samples():
+    labels = [0, 1] * 100
+    scores = [0.1, 0.9] * 100
+    intervals = bootstrap_metric_intervals(
+        labels,
+        scores,
+        threshold=0.5,
+        iterations=3,
+        seed=7,
+        max_samples=20,
+    )
+
+    assert intervals["bootstrap_population_n"] == 200
+    assert intervals["bootstrap_sample_n"] == 20
+    assert intervals["bootstrap_sample_capped"] is True
 
 
 def test_subgroup_fpr_human_only():

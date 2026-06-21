@@ -75,6 +75,8 @@ def evaluate_scores(
                 target_fpr=target_fpr,
                 iterations=bootstrap_iterations,
                 seed=int(config.get("evaluation", {}).get("bootstrap_seed", 42)),
+                max_samples=config.get("evaluation", {}).get("bootstrap_sample_size"),
+                n_jobs=config.get("evaluation", {}).get("bootstrap_n_jobs"),
             )
         )
 

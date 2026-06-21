@@ -4,6 +4,7 @@ from typing import Iterable
 
 import numpy as np
 import pandas as pd
+from joblib import Parallel, delayed
 from sklearn.metrics import (
     average_precision_score,
     confusion_matrix,
@@ -108,6 +109,53 @@ def compute_human_only_metrics(
     }
 
 
+def compute_selective_metrics(
+    y_true: Iterable[int],
+    y_score: Iterable[float],
+    *,
+    low_threshold: float,
+    high_threshold: float,
+) -> dict[str, float | bool | None]:
+    """Metrics for a three-way human/review/high-confidence-AI policy."""
+    y_true = np.asarray(list(y_true), dtype=int)
+    y_score = np.asarray(list(y_score), dtype=float)
+    if len(y_true) == 0:
+        return {
+            "selective_n": 0.0,
+            "review_zone_rate": None,
+            "coverage": None,
+            "selective_risk": None,
+            "high_confidence_ai_rate": None,
+            "human_auto_accept_rate": None,
+            "high_confidence_ai_fpr": None,
+            "high_confidence_ai_recall": None,
+        }
+
+    low_threshold = float(low_threshold)
+    high_threshold = max(float(high_threshold), low_threshold)
+    review = (y_score >= low_threshold) & (y_score < high_threshold)
+    pred_human = y_score < low_threshold
+    pred_ai = y_score >= high_threshold
+    decided = pred_human | pred_ai
+    errors = ((pred_human & (y_true == 1)) | (pred_ai & (y_true == 0))) & decided
+    humans = y_true == 0
+    ai = y_true == 1
+    return {
+        "selective_n": float(len(y_true)),
+        "low_threshold": low_threshold,
+        "high_threshold": high_threshold,
+        "review_zone_rate": float(review.mean()),
+        "coverage": float(decided.mean()),
+        "selective_risk": float(errors.sum() / max(1, decided.sum())),
+        "high_confidence_ai_rate": float(pred_ai.mean()),
+        "human_auto_accept_rate": float(pred_human.mean()),
+        "high_confidence_ai_fpr": float((pred_ai & humans).sum() / max(1, humans.sum())),
+        "high_confidence_ai_recall": (
+            float((pred_ai & ai).sum() / max(1, ai.sum())) if ai.sum() else None
+        ),
+    }
+
+
 def bootstrap_metric_intervals(
     y_true: Iterable[int],
     y_score: Iterable[float],
@@ -116,6 +164,8 @@ def bootstrap_metric_intervals(
     target_fpr: float = 0.01,
     iterations: int = 0,
     seed: int = 42,
+    max_samples: int | None = None,
+    n_jobs: int | None = None,
 ) -> dict[str, float | int | None]:
     """Bootstrap confidence intervals for report-critical metrics."""
     if iterations <= 0:
@@ -126,6 +176,12 @@ def bootstrap_metric_intervals(
         return {}
 
     rng = np.random.default_rng(seed)
+    population_n = len(y_true)
+    if max_samples and population_n > max_samples:
+        indices = _stratified_sample_indices(y_true, max_samples=int(max_samples), rng=rng)
+        y_true = y_true[indices]
+        y_score = y_score[indices]
+
     values: dict[str, list[float]] = {
         "fpr": [],
         "tpr": [],
@@ -133,31 +189,45 @@ def bootstrap_metric_intervals(
         "auroc": [],
         "aupr": [],
     }
-    for _ in range(iterations):
-        indices = rng.integers(0, len(y_true), size=len(y_true))
-        sample_labels = y_true[indices]
-        sample_scores = y_score[indices]
-        if set(np.unique(sample_labels)) == {0}:
-            metrics = compute_human_only_metrics(
-                sample_scores,
+    seeds = rng.integers(0, np.iinfo(np.int32).max, size=iterations)
+    if n_jobs is None:
+        n_jobs = 1
+    if int(n_jobs) == 1:
+        metric_rows = [
+            _bootstrap_metric_row(
+                y_true,
+                y_score,
                 threshold=threshold,
                 target_fpr=target_fpr,
+                seed=int(iteration_seed),
             )
-        elif len(set(np.unique(sample_labels))) >= 2:
-            metrics = compute_binary_metrics(
-                sample_labels,
-                sample_scores,
+            for iteration_seed in seeds
+        ]
+    else:
+        metric_rows = Parallel(n_jobs=int(n_jobs), prefer="threads")(
+            delayed(_bootstrap_metric_row)(
+                y_true,
+                y_score,
                 threshold=threshold,
                 target_fpr=target_fpr,
+                seed=int(iteration_seed),
             )
-        else:
+            for iteration_seed in seeds
+        )
+    for metrics in metric_rows:
+        if not metrics:
             continue
         for key in values:
             value = metrics.get(key)
             if value is not None and np.isfinite(float(value)):
                 values[key].append(float(value))
 
-    intervals: dict[str, float | int | None] = {"bootstrap_iterations": int(iterations)}
+    intervals: dict[str, float | int | None] = {
+        "bootstrap_iterations": int(iterations),
+        "bootstrap_population_n": int(population_n),
+        "bootstrap_sample_n": int(len(y_true)),
+        "bootstrap_sample_capped": bool(len(y_true) < population_n),
+    }
     for key, metric_values in values.items():
         intervals[f"{key}_bootstrap_n"] = len(metric_values)
         if metric_values:
@@ -167,6 +237,54 @@ def bootstrap_metric_intervals(
             intervals[f"{key}_ci_low"] = None
             intervals[f"{key}_ci_high"] = None
     return intervals
+
+
+def _bootstrap_metric_row(
+    y_true: np.ndarray,
+    y_score: np.ndarray,
+    *,
+    threshold: float,
+    target_fpr: float,
+    seed: int,
+) -> dict[str, float | bool | None]:
+    rng = np.random.default_rng(seed)
+    indices = rng.integers(0, len(y_true), size=len(y_true))
+    sample_labels = y_true[indices]
+    sample_scores = y_score[indices]
+    if set(np.unique(sample_labels)) == {0}:
+        return compute_human_only_metrics(
+            sample_scores,
+            threshold=threshold,
+            target_fpr=target_fpr,
+        )
+    if len(set(np.unique(sample_labels))) >= 2:
+        return compute_binary_metrics(
+            sample_labels,
+            sample_scores,
+            threshold=threshold,
+            target_fpr=target_fpr,
+        )
+    return {}
+
+
+def _stratified_sample_indices(y_true: np.ndarray, *, max_samples: int, rng: np.random.Generator) -> np.ndarray:
+    if max_samples <= 0 or len(y_true) <= max_samples:
+        return np.arange(len(y_true))
+    sampled = []
+    for label in np.unique(y_true):
+        label_indices = np.flatnonzero(y_true == label)
+        n_label = max(1, int(round(max_samples * len(label_indices) / len(y_true))))
+        sampled.append(rng.choice(label_indices, size=min(len(label_indices), n_label), replace=False))
+    indices = np.concatenate(sampled)
+    if len(indices) > max_samples:
+        indices = rng.choice(indices, size=max_samples, replace=False)
+    elif len(indices) < max_samples:
+        remaining = np.setdiff1d(np.arange(len(y_true)), indices, assume_unique=False)
+        if len(remaining):
+            extra = rng.choice(remaining, size=min(len(remaining), max_samples - len(indices)), replace=False)
+            indices = np.concatenate([indices, extra])
+    rng.shuffle(indices)
+    return indices
 
 
 def subgroup_fpr(

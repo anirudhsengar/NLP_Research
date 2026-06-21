@@ -27,6 +27,7 @@ from ai_text_detector.demo import launch_demo
 from ai_text_detector.evaluation import evaluate_bundle, save_evaluation_summary, save_feature_importance
 from ai_text_detector.metrics import compute_binary_metrics, compute_human_only_metrics
 from ai_text_detector.model import load_bundle, save_bundle, train_detector
+from ai_text_detector.paper_study import run_paper_study
 from ai_text_detector.reporting import save_data_profile, save_run_manifest
 from ai_text_detector.schema import read_jsonl
 
@@ -44,6 +45,11 @@ def prepare(
         help="Override config for WEP/WEUAE optional ICNALE modules.",
     ),
     skip_icnale: bool = typer.Option(False, help="Prepare only public HC3/GPT-wiki data."),
+    include_daigt: bool = typer.Option(
+        False,
+        "--include-daigt",
+        help="Also prepare the configured local DAIGT v2 CSV.",
+    ),
 ):
     """Fetch/prepare HC3, GPT-wiki-intro, and local ICNALE data."""
     cfg = load_config(config)
@@ -52,8 +58,10 @@ def prepare(
         cfg,
         max_hc3_samples=max_hc3_samples,
         max_gptwiki_samples=max_gptwiki_samples,
+        max_daigt_samples=max_hc3_samples,
         include_optional_icnale=include_optional_icnale,
         skip_icnale=skip_icnale,
+        include_daigt=include_daigt,
     )
     for name, path in outputs.items():
         console.print(f"[green]prepared[/green] {name}: {path}")
@@ -381,9 +389,51 @@ def reproduce(
             console.print(f"[green]baseline[/green] {name}: {path}")
 
 
+@app.command(name="paper-study")
+def paper_study(
+    config: Path = typer.Option(DEFAULT_CONFIG_PATH, "--config", "-c"),
+    sample_size: int | None = typer.Option(
+        2000,
+        help="In-memory balanced sample size per dataset; use 0 for full prepared data.",
+    ),
+    skip_daigt: bool = typer.Option(
+        False,
+        "--skip-daigt",
+        help="Skip DAIGT v2; otherwise the configured local CSV is required.",
+    ),
+    skip_icnale: bool = typer.Option(False, "--skip-icnale", help="Skip ICNALE fairness audit."),
+    bootstrap_iterations: int | None = typer.Option(
+        None,
+        "--bootstrap-iterations",
+        help="Override evaluation.bootstrap_iterations for this run.",
+    ),
+    run_baselines_flag: bool = typer.Option(
+        False,
+        "--run-baselines",
+        help="Run configured GLTR/RoBERTa baselines on the paper-study eval frames.",
+    ),
+):
+    """Run the revised-paper HC3/DAIGT reproduction and selective-policy extension."""
+    cfg = load_config(config)
+    ensure_dirs(cfg)
+    outputs = run_paper_study(
+        cfg,
+        sample_size=sample_size,
+        skip_daigt=skip_daigt,
+        skip_icnale=skip_icnale,
+        bootstrap_iterations=bootstrap_iterations,
+        run_baselines_flag=run_baselines_flag,
+    )
+    for name, path in outputs.items():
+        console.print(f"[green]paper-study[/green] {name}: {path}")
+
+
 @app.command()
 def demo(
-    model_path: Path = typer.Option(Path("artifacts/models/classical_logreg.joblib"), help="Saved model bundle."),
+    model_path: Path = typer.Option(
+        Path("artifacts/models/paper_study_selected.joblib"),
+        help="Saved model bundle.",
+    ),
     server_name: str = typer.Option("127.0.0.1"),
     server_port: int = typer.Option(7860),
 ):

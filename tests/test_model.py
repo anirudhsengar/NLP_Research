@@ -53,3 +53,70 @@ def test_train_detector_tiny_cycle():
     assert explanation["feature_group_contributions"]
     assert "feature_family" in explanation["feature_group_contributions"][0]
     assert "f1_macro" in metrics
+
+
+def test_explain_text_uses_selective_policy_metadata():
+    rows = []
+    for split in ("train", "validation"):
+        for idx in range(12):
+            rows.append(
+                {
+                    "sample_id": f"{split}-h-{idx}",
+                    "dataset": "hc3",
+                    "split": split,
+                    "text": "I remember a specific classroom discussion and wrote this in my own words.",
+                    "label": 0,
+                    "source": "fixture",
+                    "domain": "fixture",
+                    "group_id": f"{split}-h-{idx}",
+                }
+            )
+            rows.append(
+                {
+                    "sample_id": f"{split}-a-{idx}",
+                    "dataset": "hc3",
+                    "split": split,
+                    "text": "This comprehensive answer efficiently summarizes multiple important considerations.",
+                    "label": 1,
+                    "source": "fixture",
+                    "domain": "fixture",
+                    "group_id": f"{split}-a-{idx}",
+                }
+            )
+    config = {
+        "random_seed": 42,
+        "features": {
+            "word_ngram_range": [1, 1],
+            "char_ngram_range": [3, 3],
+            "max_word_features": 50,
+            "max_char_features": 50,
+            "min_df": 1,
+            "lowercase": True,
+            "use_spacy": False,
+        },
+        "model": {"class_weight": "balanced", "max_iter": 200, "target_fpr": 0.1, "name": "test"},
+    }
+    bundle, _ = train_detector(ensure_canonical(pd.DataFrame(rows)), config)
+    bundle.metadata["selective_policy"] = {
+        "model_name": "fixture",
+        "low_threshold": 0.0,
+        "high_threshold": 1.0,
+        "target_fpr": 0.01,
+        "learner_target_fpr": 0.01,
+        "calibration_human_count": 10,
+        "calibration_learner_count": 4,
+        "calibration_ai_count": 8,
+        "pooled_human_fpr": 0.0,
+        "learner_human_fpr": 0.0,
+        "validation_ai_recall_high_confidence": 0.5,
+        "review_zone_rate_validation": 0.2,
+        "coverage_validation": 0.8,
+    }
+
+    explanation = bundle.explain_text("This comprehensive answer summarizes considerations.")
+
+    assert explanation["policy_source"] == "paper_study_selective_policy"
+    assert explanation["low_threshold"] == 0.0
+    assert explanation["high_threshold"] == 1.0
+    assert explanation["selective_prediction"] == "manual_review"
+    assert explanation["review_zone"]["contains_score"] is True
