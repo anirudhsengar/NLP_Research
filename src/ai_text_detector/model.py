@@ -7,7 +7,6 @@ from typing import Any
 import joblib
 import numpy as np
 import pandas as pd
-from joblib import parallel_backend
 from scipy import sparse
 from sklearn.linear_model import LogisticRegression
 from sklearn.pipeline import Pipeline
@@ -27,15 +26,12 @@ class DetectorBundle:
         return self.score_frame(df, batch_size=batch_size)
 
     def score_frame(self, df: pd.DataFrame, *, batch_size: int | None = None) -> np.ndarray:
-        n_jobs = _feature_union_n_jobs(self.pipeline)
         if not batch_size or len(df) <= batch_size:
-            with parallel_backend("threading", n_jobs=n_jobs):
-                return self.pipeline.predict_proba(df)[:, 1]
+            return self.pipeline.predict_proba(df)[:, 1]
         scores = []
         for start in range(0, len(df), batch_size):
             batch = df.iloc[start : start + batch_size]
-            with parallel_backend("threading", n_jobs=n_jobs):
-                scores.append(self.pipeline.predict_proba(batch)[:, 1])
+            scores.append(self.pipeline.predict_proba(batch)[:, 1])
         return np.concatenate(scores)
 
     def predict_frame(self, df: pd.DataFrame) -> pd.DataFrame:
@@ -51,26 +47,24 @@ class DetectorBundle:
         names, contributions = self._feature_contributions(df)
         order_pos = np.argsort(contributions)[::-1][:top_k]
         order_neg = np.argsort(contributions)[:top_k]
-        low_threshold = self.low_threshold
-        high_threshold = self.high_confidence_threshold
-        selective_prediction = self.selective_prediction(score)
+        education_threshold = self.education_threshold
+        mitigated_prediction = (
+            "ai_generated"
+            if score >= education_threshold
+            else "manual_review"
+            if self.threshold <= score < education_threshold
+            else "human_written"
+        )
         return {
             "score_ai": score,
             "threshold": self.threshold,
-            "low_threshold": low_threshold,
-            "high_threshold": high_threshold,
-            "education_threshold": high_threshold,
+            "education_threshold": education_threshold,
             "prediction": "ai_generated" if score >= self.threshold else "human_written",
-            "selective_prediction": selective_prediction,
-            "selective_decision": _display_decision(selective_prediction),
-            "mitigated_prediction": selective_prediction,
-            "policy_source": self.policy_source,
-            "policy": self.selective_policy or {},
+            "mitigated_prediction": mitigated_prediction,
             "review_zone": {
-                "low": low_threshold,
-                "high": high_threshold,
-                "active": high_threshold > low_threshold,
-                "contains_score": high_threshold > low_threshold and low_threshold <= score < high_threshold,
+                "low": self.threshold,
+                "high": education_threshold,
+                "active": education_threshold > self.threshold,
             },
             "top_ai_features": [
                 {"feature": str(names[idx]), "contribution": float(contributions[idx])}
@@ -102,46 +96,6 @@ class DetectorBundle:
         thresholds = calibration.get("thresholds", {})
         return float(thresholds.get("education_mitigated", self.threshold))
 
-    @property
-    def selective_policy(self) -> dict[str, Any] | None:
-        policy = self.metadata.get("selective_policy")
-        if not isinstance(policy, dict):
-            return None
-        if "low_threshold" not in policy or "high_threshold" not in policy:
-            return None
-        return policy
-
-    @property
-    def low_threshold(self) -> float:
-        policy = self.selective_policy
-        if policy is not None:
-            return float(policy["low_threshold"])
-        return float(self.threshold)
-
-    @property
-    def high_confidence_threshold(self) -> float:
-        policy = self.selective_policy
-        if policy is not None:
-            return max(float(policy["high_threshold"]), self.low_threshold)
-        return max(float(self.education_threshold), self.low_threshold)
-
-    @property
-    def policy_source(self) -> str:
-        if self.selective_policy is not None:
-            return "paper_study_selective_policy"
-        if self.education_threshold > self.threshold:
-            return "legacy_education_calibration"
-        return "default_binary_threshold"
-
-    def selective_prediction(self, score: float) -> str:
-        low_threshold = self.low_threshold
-        high_threshold = self.high_confidence_threshold
-        if high_threshold > low_threshold and low_threshold <= score < high_threshold:
-            return "manual_review"
-        if score >= high_threshold:
-            return "high_confidence_ai"
-        return "human_written"
-
 
 def train_detector(
     hc3: pd.DataFrame,
@@ -158,30 +112,20 @@ def train_detector(
     if use_spacy is not None:
         feature_config["use_spacy"] = use_spacy
 
-    model_cfg = config["model"]
-    penalty = model_cfg.get("penalty", "l2")
-    solver = _solver_for_penalty(str(penalty))
-    classifier_kwargs: dict[str, Any] = {
-        "class_weight": model_cfg.get("class_weight", "balanced"),
-        "max_iter": int(model_cfg.get("max_iter", 1000)),
-        "solver": solver,
-        "random_state": int(config.get("random_seed", 42)),
-    }
-    if penalty in {"elasticnet", "l1"}:
-        classifier_kwargs["penalty"] = penalty
-    if penalty == "elasticnet":
-        classifier_kwargs["l1_ratio"] = float(model_cfg.get("l1_ratio", 0.5))
-    classifier = LogisticRegression(**classifier_kwargs)
+    classifier = LogisticRegression(
+        class_weight=config["model"].get("class_weight", "balanced"),
+        max_iter=int(config["model"].get("max_iter", 1000)),
+        solver="liblinear",
+        random_state=int(config.get("random_seed", 42)),
+    )
     pipeline = Pipeline(
         [
             ("features", make_feature_pipeline(feature_config)),
             ("classifier", classifier),
         ]
     )
-    n_jobs = feature_config.get("n_jobs")
-    with parallel_backend("threading", n_jobs=n_jobs):
-        pipeline.fit(train_df, train_df["label"].astype(int))
-        validation_scores = pipeline.predict_proba(validation_df)[:, 1]
+    pipeline.fit(train_df, train_df["label"].astype(int))
+    validation_scores = pipeline.predict_proba(validation_df)[:, 1]
     threshold = threshold_for_target_fpr(
         validation_df["label"].astype(int),
         validation_scores,
@@ -198,8 +142,6 @@ def train_detector(
         threshold=threshold,
         metadata={
             "model_name": config["model"].get("name", "classical_logreg"),
-            "model_variant": config["model"].get("variant", "word_char_stats_lr"),
-            "penalty": penalty,
             "target_fpr": float(config["model"].get("target_fpr", 0.01)),
             "feature_config": feature_config,
             "validation_metrics": metrics,
@@ -217,21 +159,6 @@ def save_bundle(bundle: DetectorBundle, path: str | Path) -> Path:
 
 def load_bundle(path: str | Path) -> DetectorBundle:
     return joblib.load(path)
-
-
-def _solver_for_penalty(penalty: str) -> str:
-    if penalty == "elasticnet":
-        return "saga"
-    if penalty == "l1":
-        return "liblinear"
-    return "liblinear"
-
-
-def _feature_union_n_jobs(pipeline: Pipeline) -> int | None:
-    try:
-        return pipeline.named_steps["features"].n_jobs
-    except Exception:
-        return None
 
 
 def _group_feature_contributions(
@@ -284,12 +211,3 @@ def _feature_family(feature: str) -> str:
         "lm_stats": "GPT-2/GLTR stats",
     }
     return labels.get(family, family)
-
-
-def _display_decision(prediction: str) -> str:
-    labels = {
-        "human_written": "Human",
-        "manual_review": "Manual review",
-        "high_confidence_ai": "High-confidence AI",
-    }
-    return labels.get(prediction, prediction)

@@ -1,6 +1,8 @@
 # Interpretable and Bias-Aware AI-Text Detection
 
-This repository contains the code, experiment pipeline, paper artifacts, and Gradio demo for the CSAI411 AI-text-detection project. It reproduces an HC3/DAIGT v2 TF-IDF logistic-regression baseline, extends it with a fairness-constrained three-way selective policy, evaluates out-of-domain robustness, and audits false positives on learner-English writing.
+This repository contains the code and experiment pipeline for the CSAI411 project proposal. It builds an interpretable detector for AI-generated text, evaluates out-of-domain robustness, and audits false positives on learner-English writing.
+
+The research paper is intentionally out of scope here. The deliverables are code, saved models, result tables, figures, and a Gradio demo.
 
 ## Setup
 
@@ -105,23 +107,11 @@ Include heavier linguistic or GPT-2/GLTR-style feature ablations only when those
 uv run aidetect ablations --include-spacy --include-lm-stats --max-eval-samples 1000
 ```
 
-Run the older binary-model calibration command when you need the legacy education-use threshold artifacts:
+Calibrate a conservative education-use threshold and evaluate the mitigation policy on held-out audit data:
 
 ```bash
 uv run aidetect calibrate
 ```
-
-Run the revised reproduction-and-extension study for the paper. This uses HC3 plus DAIGT v2
-unless `--skip-daigt` is set, compares sparse logistic-regression feature families, calibrates
-a three-way selective policy, and writes the new paper tables and figures:
-
-```bash
-uv run aidetect paper-study --sample-size 2000 --skip-daigt --bootstrap-iterations 20
-uv run aidetect paper-study --sample-size 0 --bootstrap-iterations 1000 --run-baselines
-```
-
-For the full DAIGT reproduction, place `train_v2_drcat_02.csv` at
-`data/raw/daigt_v2/train_v2_drcat_02.csv` with at least `text` and `label` columns.
 
 Regenerate the dataset provenance/count report from prepared files:
 
@@ -138,15 +128,9 @@ uv run aidetect eval
 uv run aidetect demo
 ```
 
-The demo command now defaults to the final paper-study model at
-`artifacts/models/paper_study_selected.joblib`. Pass `--model-path
-artifacts/models/classical_logreg.joblib` only when you intentionally want the
-older binary-threshold model.
-
 ## Outputs
 
-- Classical reproduction model: `artifacts/models/classical_logreg.joblib`
-- Final selective paper-study model used by the demo: `artifacts/models/paper_study_selected.joblib`
+- Trained model: `artifacts/models/classical_logreg.joblib`
 - Metrics and prediction CSVs: `reports/results/`
 - Consolidated result table: `reports/results/summary_table.csv`
 - Baseline result table: `reports/results/baseline_summary_table.csv`
@@ -157,11 +141,6 @@ older binary-threshold model.
 - Grouped feature importance: `reports/results/logreg_feature_group_summary.csv`
 - Fixed-sample model comparison: `reports/results/model_comparison_table.csv`
 - Paper artifact checklist: `reports/results/paper_readiness_summary.json`
-- Revised paper-study summary: `reports/results/paper_study_summary.csv`
-- Three-way selective policy table: `reports/results/selective_policy_table.csv`
-- Topic/source holdout table: `reports/results/topic_holdout_results.csv`
-- Feature-family tradeoff table: `reports/results/feature_family_tradeoff.csv`
-- Deterministic style-invariance table: `reports/results/style_invariance_results.csv`
 - Per-evaluation error lists: `reports/results/*_errors.csv`
 - Figures: `reports/figures/`
 - Demo: <http://127.0.0.1:7860>

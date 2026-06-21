@@ -46,95 +46,9 @@ def split_by_group(
     return df
 
 
-def split_by_topic(
-    df: pd.DataFrame,
-    *,
-    topic_col: str = "domain",
-    train_size: float = 0.70,
-    validation_size: float = 0.15,
-    test_size: float = 0.15,
-    seed: int = 42,
-) -> pd.DataFrame:
-    """Assign whole topics/domains to train/validation/test partitions."""
-    if not np.isclose(train_size + validation_size + test_size, 1.0):
-        raise ValueError("Split sizes must sum to 1.0")
-    if topic_col not in df.columns:
-        raise ValueError(f"Topic column not found: {topic_col}")
-
-    work = df.copy()
-    topics = (
-        work[topic_col]
-        .fillna("unknown")
-        .astype(str)
-        .replace("", "unknown")
-        .drop_duplicates()
-        .to_numpy()
-    )
-    if len(topics) < 3:
-        raise ValueError("At least three topics are required for a topic-holdout split.")
-
-    rng = np.random.default_rng(seed)
-    shuffled = topics.copy()
-    rng.shuffle(shuffled)
-
-    n_topics = len(shuffled)
-    n_train = _bounded_count(round(n_topics * train_size), minimum=1, maximum=n_topics - 2)
-    n_validation = _bounded_count(
-        round(n_topics * validation_size),
-        minimum=1,
-        maximum=n_topics - n_train - 1,
-    )
-    train_topics = set(shuffled[:n_train])
-    validation_topics = set(shuffled[n_train : n_train + n_validation])
-    test_topics = set(shuffled[n_train + n_validation :])
-    if not test_topics:
-        test_topics = {validation_topics.pop()}
-
-    work["_topic_key"] = work[topic_col].fillna("unknown").astype(str).replace("", "unknown")
-    split_map = {topic: "train" for topic in train_topics}
-    split_map.update({topic: "validation" for topic in validation_topics})
-    split_map.update({topic: "test" for topic in test_topics})
-    work["split"] = work["_topic_key"].map(split_map)
-    return work.drop(columns=["_topic_key"])
-
-
-def leave_one_domain_out_frames(
-    df: pd.DataFrame,
-    *,
-    domain_col: str = "domain",
-    validation_size: float = 0.15,
-    seed: int = 42,
-) -> dict[str, pd.DataFrame]:
-    """Return split-labelled frames where each domain is held out as test once."""
-    if domain_col not in df.columns:
-        raise ValueError(f"Domain column not found: {domain_col}")
-    frames: dict[str, pd.DataFrame] = {}
-    domains = sorted(value for value in df[domain_col].dropna().astype(str).unique() if value)
-    for domain in domains:
-        work = df.copy()
-        held_out = work[domain_col].astype(str) == domain
-        work.loc[held_out, "split"] = "test"
-        remaining = work[~held_out].copy()
-        groups = remaining[["group_id", domain_col]].drop_duplicates("group_id").reset_index(drop=True)
-        validation_groups, _ = train_test_split(
-            groups,
-            train_size=min(max(validation_size, 0.01), 0.99),
-            random_state=seed,
-            stratify=_safe_stratify(groups[domain_col]),
-        )
-        validation_ids = set(validation_groups["group_id"])
-        work.loc[~held_out, "split"] = "train"
-        work.loc[work["group_id"].isin(validation_ids), "split"] = "validation"
-        frames[domain] = work.reset_index(drop=True)
-    return frames
-
-
 def _safe_stratify(values: pd.Series) -> pd.Series | None:
     counts = values.fillna("unknown").astype(str).value_counts()
     if len(counts) <= 1 or counts.min() < 2:
         return None
     return values.fillna("unknown").astype(str)
 
-
-def _bounded_count(value: int, *, minimum: int, maximum: int) -> int:
-    return max(minimum, min(maximum, int(value)))

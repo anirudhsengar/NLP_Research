@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import html
-import csv
 import re
 import struct
 import sys
@@ -21,53 +20,6 @@ PIC_NS = "http://schemas.openxmlformats.org/drawingml/2006/picture"
 IMAGE_REL_TYPE = "http://purl.oclc.org/ooxml/officeDocument/relationships/image"
 PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 EMU_PER_INCH = 914400
-
-HEADER_ALIASES = {
-    "eval_set": "Eval",
-    "n": "n",
-    "default_fpr": "Def FPR",
-    "default_tpr": "Def AI R",
-    "high_confidence_fpr": "HC FPR",
-    "high_confidence_tpr": "HC AI R",
-    "selective_review_zone_rate": "Review",
-    "selective_coverage": "Cov.",
-    "selective_selective_risk": "Sel risk",
-    "model_name": "Model",
-    "low_threshold": "Low t",
-    "high_threshold": "High t",
-    "pooled_human_fpr": "Cal FPR",
-    "learner_human_fpr": "Lrn FPR",
-    "validation_ai_recall_high_confidence": "Val AI R",
-    "review_zone_rate_validation": "Review",
-    "selected": "Sel",
-    "held_out_source": "Held out",
-    "n_test": "n",
-    "test_f1_macro": "F1",
-    "test_fpr": "FPR",
-    "test_tpr": "AI R",
-    "mean_abs_score_shift": "Mean shift",
-    "p95_abs_score_shift": "P95 shift",
-    "default_decision_flip_rate": "Def flip",
-    "high_confidence_decision_flip_rate": "HC flip",
-}
-
-VALUE_ALIASES = {
-    "alikhanov_style_word_tfidf_lr": "Alik. word",
-    "word_char_stats_lr": "W+C+S",
-    "no_character_lr": "No-char",
-    "stats_only_lr": "Stats",
-    "word_only_lr": "Word",
-    "char_capped_lr": "Char-cap",
-    "topic_test": "Topic",
-    "gpt_wiki_intro_ood": "GPT-wiki",
-    "icnale_fairness_audit": "ICNALE",
-    "style_normalized": "Style norm.",
-    "reddit_eli5": "reddit ELI5",
-    "wiki_csai": "wiki CSAI",
-    "open_qa": "open QA",
-    "True": "yes",
-    "False": "no",
-}
 
 
 DOCUMENT_PREFIX = f'''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
@@ -304,7 +256,7 @@ def image_block(image: dict[str, Any]) -> str:
 
 
 def parse_markdown(path: Path) -> dict:
-    lines = expand_result_placeholders(path.read_text(encoding="utf-8"), path).splitlines()
+    lines = path.read_text(encoding="utf-8").splitlines()
     title = lines[0].removeprefix("# ").strip()
     authors = ""
     affiliation = ""
@@ -335,116 +287,6 @@ def parse_markdown(path: Path) -> dict:
         "affiliation": affiliation,
         "sections": sections,
     }
-
-
-def expand_result_placeholders(text: str, markdown: Path) -> str:
-    root = markdown.resolve().parent.parent
-    results = root / "reports" / "results"
-    replacements = {
-        "{{paper_study_summary_table}}": csv_table(
-            results / "paper_study_summary.csv",
-            columns=[
-                "eval_set",
-                "default_fpr",
-                "high_confidence_fpr",
-                "high_confidence_tpr",
-                "selective_review_zone_rate",
-                "selective_coverage",
-                "selective_selective_risk",
-            ],
-            where={"selected_model": "True"},
-            skip_values={"eval_set": {"topic_validation"}},
-            max_rows=8,
-        ),
-        "{{selective_policy_table}}": csv_table(
-            results / "selective_policy_table.csv",
-            columns=[
-                "model_name",
-                "low_threshold",
-                "high_threshold",
-                "pooled_human_fpr",
-                "learner_human_fpr",
-                "validation_ai_recall_high_confidence",
-                "review_zone_rate_validation",
-                "selected",
-            ],
-            max_rows=8,
-        ),
-        "{{topic_holdout_table}}": csv_table(
-            results / "topic_holdout_results.csv",
-            columns=["held_out_source", "n_test", "test_f1_macro", "test_fpr", "test_tpr"],
-            max_rows=8,
-        ),
-        "{{style_invariance_table}}": csv_table(
-            results / "style_invariance_results.csv",
-            columns=[
-                "eval_set",
-                "n",
-                "mean_abs_score_shift",
-                "p95_abs_score_shift",
-                "default_decision_flip_rate",
-                "high_confidence_decision_flip_rate",
-            ],
-            where={"model": "word_char_stats_lr", "transform": "style_normalized"},
-            max_rows=10,
-        ),
-    }
-    for placeholder, replacement in replacements.items():
-        text = text.replace(placeholder, replacement)
-    return text
-
-
-def csv_table(
-    path: Path,
-    *,
-    columns: list[str],
-    where: dict[str, str] | None = None,
-    skip_values: dict[str, set[str]] | None = None,
-    max_rows: int = 10,
-) -> str:
-    if not path.exists():
-        return "| Artifact | Status |\n|---|---|\n| " + path.name + " | Not generated |\n"
-    with path.open("r", encoding="utf-8", newline="") as f:
-        rows = list(csv.DictReader(f))
-    if where:
-        rows = [
-            row
-            for row in rows
-            if all(str(row.get(column, "")) == expected for column, expected in where.items())
-        ]
-    if skip_values:
-        rows = [
-            row
-            for row in rows
-            if all(str(row.get(column, "")) not in values for column, values in skip_values.items())
-        ]
-    rows = rows[:max_rows]
-    header = "| " + " | ".join(clean_header(column) for column in columns) + " |"
-    divider = "| " + " | ".join("---" for _ in columns) + " |"
-    body = [
-        "| " + " | ".join(format_cell(row.get(column, "")) for column in columns) + " |"
-        for row in rows
-    ]
-    return "\n".join([header, divider, *body]) + "\n"
-
-
-def clean_header(value: str) -> str:
-    return HEADER_ALIASES.get(value, value.replace("_", " "))
-
-
-def format_cell(value: str) -> str:
-    text = str(value)
-    if not text:
-        return ""
-    if text in VALUE_ALIASES:
-        return VALUE_ALIASES[text]
-    try:
-        number = float(text)
-    except ValueError:
-        return text.replace("_", " ")
-    if abs(number) >= 100:
-        return f"{number:.0f}"
-    return f"{number:.4f}"
 
 
 def consume_blocks(lines: list[str]) -> list[tuple[str, object]]:
