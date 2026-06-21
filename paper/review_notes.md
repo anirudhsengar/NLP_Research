@@ -1,12 +1,12 @@
 # Review Notes Before Submission
 
-Generated after the anchor-compatible DAIGT-inclusive `paper-study` run completed on June 21, 2026.
+Generated after the DAIGT-inclusive `paper-study` run completed on June 20, 2026.
 
 ## Items That May Need Human Confirmation
 
 - Author emails were not provided, so the final paper uses names/student IDs and the confirmed department/university/city/country affiliation only.
 - No instructor, course, sponsor, or funding acknowledgment was confirmed. The acknowledgment section is omitted rather than filled with unconfirmed text.
-- The final reproduction run uses the frozen merged HC3/DAIGT CSV from the public anchor codebase and does not redistribute it. The local expected path is `data/raw/anchor_merged/merged_dataset.csv`.
+- DAIGT v2 is required for the final reproduction run but is not redistributed by this repository. The local expected path is `data/raw/daigt_v2/train_v2_drcat_02.csv`.
 - TOEFL remains out of scope. ICNALE is used as the learner-English fairness audit.
 - ICNALE is human-only in this study, so it supports false-positive auditing but not AI recall for learner-English prompts.
 - ICNALE audit rows are never used for training, threshold selection, or model selection.

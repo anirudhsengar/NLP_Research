@@ -2,16 +2,7 @@ from __future__ import annotations
 
 import pandas as pd
 
-from ai_text_detector.splitting import (
-    ANCHOR_TEST_SOURCES,
-    ANCHOR_TRAIN_SOURCES,
-    ANCHOR_VALIDATION_SOURCES,
-    anchor_source_keys,
-    leave_one_domain_out_frames,
-    split_by_anchor_source,
-    split_by_group,
-    split_by_topic,
-)
+from ai_text_detector.splitting import leave_one_domain_out_frames, split_by_group, split_by_topic
 
 
 def test_split_by_group_has_no_group_leakage():
@@ -70,29 +61,3 @@ def test_leave_one_domain_out_frames_hold_out_each_domain():
         test_domains = set(frame.loc[frame["split"] == "test", "domain"])
         assert test_domains == {domain}
         assert {"train", "validation", "test"}.issubset(set(frame["split"]))
-
-
-def test_split_by_anchor_source_matches_public_notebook_lists():
-    rows = []
-    for source in [*ANCHOR_TRAIN_SOURCES, *ANCHOR_VALIDATION_SOURCES, *ANCHOR_TEST_SOURCES]:
-        dataset, domain = source.split("_", 1)
-        if dataset == "DAIGT":
-            dataset = "daigt_v2"
-            domain = domain.removeprefix("v2_")
-        else:
-            dataset = "hc3"
-        rows.append(
-            {
-                "dataset": dataset,
-                "domain": domain,
-                "source": domain,
-                "group_id": source,
-                "label": 0,
-                "text": f"{source} sample",
-            }
-        )
-    split = split_by_anchor_source(pd.DataFrame(rows))
-    source_to_split = dict(zip(anchor_source_keys(split), split["split"], strict=False))
-    assert {source_to_split[source] for source in ANCHOR_TRAIN_SOURCES} == {"train"}
-    assert {source_to_split[source] for source in ANCHOR_VALIDATION_SOURCES} == {"validation"}
-    assert {source_to_split[source] for source in ANCHOR_TEST_SOURCES} == {"test"}

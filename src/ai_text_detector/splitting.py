@@ -4,35 +4,6 @@ import numpy as np
 import pandas as pd
 from sklearn.model_selection import train_test_split
 
-ANCHOR_TRAIN_SOURCES = [
-    "HC3_reddit_eli5",
-    "HC3_finance",
-    "DAIGT_v2_Distance learning",
-    "DAIGT_v2_Seeking multiple opinions",
-    "HC3_open_qa",
-]
-
-ANCHOR_VALIDATION_SOURCES = [
-    "DAIGT_v2_Car-free cities",
-    "DAIGT_v2_Does the electoral college work?",
-    "DAIGT_v2_Facial action coding system",
-    "DAIGT_v2_Mandatory extracurricular activities",
-    "DAIGT_v2_Summer projects",
-    "HC3_medicine",
-    "DAIGT_v2_Driverless cars",
-    "DAIGT_v2_Exploring Venus",
-]
-
-ANCHOR_TEST_SOURCES = [
-    "DAIGT_v2_Cell phones at school",
-    "DAIGT_v2_Grades for extracurricular activities",
-    "DAIGT_v2_Community service",
-    'DAIGT_v2_"A Cowboy Who Rode the Waves"',
-    "DAIGT_v2_The Face on Mars",
-    "HC3_wiki_csai",
-    "DAIGT_v2_Phones and driving",
-]
-
 
 def split_by_group(
     df: pd.DataFrame,
@@ -125,45 +96,6 @@ def split_by_topic(
     split_map.update({topic: "test" for topic in test_topics})
     work["split"] = work["_topic_key"].map(split_map)
     return work.drop(columns=["_topic_key"])
-
-
-def split_by_anchor_source(
-    df: pd.DataFrame,
-    *,
-    strict: bool = True,
-) -> pd.DataFrame:
-    """Use the final manual source split from the public anchor notebooks."""
-    work = df.copy()
-    keys = anchor_source_keys(work)
-    split_map = {source: "train" for source in ANCHOR_TRAIN_SOURCES}
-    split_map.update({source: "validation" for source in ANCHOR_VALIDATION_SOURCES})
-    split_map.update({source: "test" for source in ANCHOR_TEST_SOURCES})
-    assigned = keys.map(split_map)
-    missing = sorted(set(keys[assigned.isna()].astype(str)))
-    if strict and missing:
-        raise ValueError(f"Anchor source split has no assignment for source(s): {missing}")
-    work["split"] = assigned.fillna("train")
-    return work
-
-
-def anchor_source_keys(df: pd.DataFrame) -> pd.Series:
-    """Return source labels compatible with crusnix/ai_text_detector_final notebooks."""
-    if "dataset" not in df.columns:
-        raise ValueError("dataset column is required for anchor source keys")
-    if "domain" not in df.columns and "source" not in df.columns:
-        raise ValueError("domain or source column is required for anchor source keys")
-    dataset = df["dataset"].fillna("").astype(str).str.lower()
-    topic = df.get("domain", df.get("source")).fillna("").astype(str)
-    fallback = df.get("source", topic).fillna("").astype(str)
-    topic = topic.where(topic.str.len() > 0, fallback)
-    return pd.Series(
-        np.select(
-            [dataset.eq("hc3"), dataset.eq("daigt_v2")],
-            ["HC3_" + topic, "DAIGT_v2_" + topic],
-            default=dataset + "_" + topic,
-        ),
-        index=df.index,
-    )
 
 
 def leave_one_domain_out_frames(
