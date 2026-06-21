@@ -7,6 +7,7 @@ import pandas as pd
 import typer
 from rich.console import Console
 
+from ai_text_detector.anchor_study import run_anchor_study
 from ai_text_detector.baselines import run_transformer_baselines
 from ai_text_detector.calibration import (
     calibrate_thresholds,
@@ -196,6 +197,75 @@ def compare(
     console.print(f"[green]saved comparison sample ids[/green] {sample_ids}")
     console.print(f"[green]saved model comparison table[/green] {comparison_table}")
     console.print(f"[green]saved paper-readiness summary[/green] {readiness}")
+    console.print(f"[green]saved run manifest[/green] {manifest_path}")
+
+
+@app.command(name="anchor-study")
+def anchor_study(
+    config: Path = typer.Option(DEFAULT_CONFIG_PATH, "--config", "-c"),
+    anchor_data_path: Path | None = typer.Option(
+        None,
+        help="Hydrated HC3+DAIGT CSV; defaults to data/raw/anchor_merged/merged_dataset.csv.",
+    ),
+    models: str = typer.Option(
+        "m0,m1,m2",
+        help="Comma-separated models to run: m0, m1, m2.",
+    ),
+    max_external_samples: int = typer.Option(
+        0,
+        help="Optional cap for GPT-wiki/ICNALE eval sets; 0 uses full available data.",
+    ),
+    bootstrap_iterations: int | None = typer.Option(
+        None,
+        help="Override bootstrap iterations for anchor outputs; defaults to config.",
+    ),
+    paired_bootstrap_iterations: int = typer.Option(
+        300,
+        help="Paired bootstrap iterations for AUROC comparison tests.",
+    ),
+    run_leave_one_domain: bool = typer.Option(
+        True,
+        "--run-leave-one-domain/--skip-leave-one-domain",
+        help="Run HC3 leave-one-domain-out sensitivity retraining.",
+    ),
+    grid_search_extensions: bool = typer.Option(
+        True,
+        "--grid-search-extensions/--no-grid-search-extensions",
+        help="Tune M1/M2 C and penalty with 5-fold CV.",
+    ),
+    permutation_sample_size: int = typer.Option(
+        2000,
+        help="Anchor-test sample size for grouped permutation importance; 0 skips it.",
+    ),
+    verify_anchor_counts: bool = typer.Option(
+        True,
+        "--verify-anchor-counts/--no-verify-anchor-counts",
+        help="Require exact production anchor split counts.",
+    ),
+):
+    """Run the Alikhanov anchor-paper comparison study."""
+    cfg = load_config(config)
+    ensure_dirs(cfg)
+    requested_models = [item.strip() for item in models.split(",") if item.strip()]
+    outputs = run_anchor_study(
+        cfg,
+        anchor_data_path=anchor_data_path,
+        models=requested_models,
+        max_external_samples=None if max_external_samples == 0 else max_external_samples,
+        bootstrap_iterations=bootstrap_iterations,
+        paired_bootstrap_iterations=paired_bootstrap_iterations,
+        run_leave_one_domain=run_leave_one_domain,
+        grid_search_extensions=grid_search_extensions,
+        permutation_sample_size=permutation_sample_size,
+        verify_anchor_counts=verify_anchor_counts,
+    )
+    manifest_path = save_run_manifest(
+        cfg,
+        command="aidetect anchor-study",
+        outputs=outputs,
+    )
+    for name, path in outputs.items():
+        console.print(f"[green]anchor-study[/green] {name}: {path}")
     console.print(f"[green]saved run manifest[/green] {manifest_path}")
 
 

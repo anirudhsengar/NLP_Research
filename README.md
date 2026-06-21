@@ -107,6 +107,26 @@ Include heavier linguistic or GPT-2/GLTR-style feature ablations only when those
 uv run aidetect ablations --include-spacy --include-lm-stats --max-eval-samples 1000
 ```
 
+Run the Alikhanov et al. anchor-paper comparison on the hydrated HC3+DAIGT
+dataset:
+
+```bash
+uv run aidetect anchor-study
+```
+
+For a shorter artifact pass that still reproduces the exact M0 grid but samples
+external audits and skips leave-one-domain retraining:
+
+```bash
+uv run aidetect anchor-study --max-external-samples 30000 --skip-leave-one-domain --no-grid-search-extensions
+```
+
+The command writes `reports/results/anchor_study_summary.csv`,
+`anchor_grid_results.csv`, `anchor_threshold_metrics.csv`,
+`anchor_stat_tests.csv`, `anchor_subgroup_fpr_ci.csv`, and
+`anchor_calibration_metrics.csv`. The exact M0 reproduction can take several
+minutes because it runs the paper's full 5-fold TF-IDF/logistic-regression grid.
+
 Calibrate a conservative education-use threshold and evaluate the mitigation policy on held-out audit data:
 
 ```bash
@@ -140,6 +160,7 @@ uv run aidetect demo
 - Feature ablation table: `reports/results/ablation_metrics.csv`
 - Grouped feature importance: `reports/results/logreg_feature_group_summary.csv`
 - Fixed-sample model comparison: `reports/results/model_comparison_table.csv`
+- Alikhanov anchor comparison: `reports/results/anchor_study_summary.csv`
 - Paper artifact checklist: `reports/results/paper_readiness_summary.json`
 - Per-evaluation error lists: `reports/results/*_errors.csv`
 - Figures: `reports/figures/`
